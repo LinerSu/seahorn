@@ -31,6 +31,7 @@
 #include "clam/ClamQueryAPI.hh"
 #include "clam/SeaDsaHeapAbstraction.hh"
 #include "crab/domains/abstract_domain_params.hpp"
+#include "crab/support/stats.hpp"
 
 #include "seadsa/ShadowMem.hh"
 
@@ -164,6 +165,17 @@ static llvm::cl::opt<bool> UseCrabCheckIsDeref(
     "horn-bv2-crab-check-is-deref",
     llvm::cl::desc("Use crab to check sea.is_dereferenceable"),
     llvm::cl::init(false));
+
+// Allow crab with object domain performs state reduction
+static llvm::cl::opt<bool> CrabObjectReduce(
+    "horn-bv2-crab-reduce",
+    llvm::cl::desc("Use crab to perform object domain reduction"),
+    llvm::cl::init(false));
+
+// Crab print statistics
+static llvm::cl::opt<bool> CrabStats("horn-bv2-crab-stats",
+                                     llvm::cl::desc("Show crab statistics"),
+                                     llvm::cl::init(false));
 
 static llvm::cl::opt<bool> UseLVIInferRng(
     "horn-bv2-lvi-rng",
@@ -852,6 +864,7 @@ public:
     Expr res;
     bool crabSolved = false;
     if (UseCrabLowerIsDeref || UseCrabCheckIsDeref) {
+      Stats::resume("opsem.time.crab.isderef");
       // if crab is used, infer the result of sea.is_deref
       Instruction *inst = CS.getInstruction();
       auto derefInfoFromCrab = m_sem.getCrabInstRng(*inst);
@@ -877,6 +890,7 @@ public:
             MSG << "crab cannot solve: " << *inst << " at File=" << File
                 << " Line=" << Line << " col=" << Col;);
       }
+      Stats::stop("opsem.time.crab.isderef");
     }
     if (!crabSolved) {
       res = m_ctx.mem().isDereferenceable(ptr, byteSz);
@@ -3424,10 +3438,18 @@ void Bv2OpSem::runCrabAnalysis() {
   aparams.run_inter = true;
   aparams.check = clam::CheckerKind::NOCHECKS;
   aparams.widening_delay = 2; // set to delay widening
+  if (CrabStats) {
+    aparams.stats = true;
+    crab::CrabEnableStats();
+  }
 
   if (UseCrabCheckIsDeref) {
     crab::domains::crab_domain_params_man::get().
       set_param("region.is_dereferenceable", "true");
+  }
+  if (CrabObjectReduce) {
+    crab::domains::crab_domain_params_man::get().set_param(
+        "object.reduce_everywhere", "true");
   }
   /// Run the Crab analysis
   clam::ClamGlobalAnalysis::abs_dom_map_t assumptions;
