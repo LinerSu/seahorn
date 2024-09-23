@@ -44,7 +44,22 @@ static llvm::cl::opt<clam::CrabDomain::Type, true, clam::CrabDomainParser>
                  clEnumValN(clam::CrabDomain::PK, "pk",
                             "Convex Polyhedra and Linear Equalities domains")),
              llvm::cl::location(CrabDom),
-             llvm::cl::init(clam::CrabDomain::ZONES_SPLIT_DBM));
+             llvm::cl::init(clam::CrabDomain::INTERVALS));
+
+static llvm::cl::opt<std::string>
+    CrabObjReduce("crab-obj-reduction",
+                  llvm::cl::desc("Provide Reduction Level"),
+                  llvm::cl::init("OPT"));
+
+// Crab print statistics
+static llvm::cl::opt<bool> CrabStats("crab-show-stats",
+                                     llvm::cl::desc("Show crab statistics"),
+                                     llvm::cl::init(false));
+
+static llvm::cl::opt<bool>
+    CrabLiveness("crab-liveness",
+                 llvm::cl::desc("Run crab liveness to remove dead vars"),
+                 llvm::cl::init(false));
 
 namespace seahorn {
 using namespace llvm;
@@ -54,10 +69,11 @@ void CrabAnalysis::initCrabAnalysis(
     llvm::TargetLibraryInfoWrapperPass &tliPass) {
 
   clam::SeaDsaHeapAbstractionParams params;
-  params.is_context_sensitive = (dsa.kind() == seadsa::GlobalAnalysisKind::CONTEXT_SENSITIVE);
+  params.is_context_sensitive =
+      (dsa.kind() == seadsa::GlobalAnalysisKind::CONTEXT_SENSITIVE);
   params.precision_level = clam::CrabBuilderPrecision::MEM;
   std::unique_ptr<clam::HeapAbstraction> heap_abs =
-    std::make_unique<clam::SeaDsaHeapAbstraction>(M, dsa, params);
+      std::make_unique<clam::SeaDsaHeapAbstraction>(M, dsa, params);
 
   // -- Set parameters for CFG
   clam::CrabBuilderParams cfg_builder_params;
@@ -79,10 +95,23 @@ void CrabAnalysis::runCrabAnalysis() {
   aparams.check = clam::CheckerKind::NOCHECKS;
   aparams.widening_delay = 2; // set to delay widening
   aparams.dom = CrabDom;      // set Crab abstract domain
+  aparams.run_liveness = CrabLiveness; // remove dead vars at the end of each bb
+
+  if (CrabStats) {
+    aparams.stats = true;
+    crab::CrabEnableStats();
+    // aparams.check_verbose = 5;
+  }
+
+  LOG("seapp-crab-ir", aparams.output_crabir = "seapp.crabir";);
 
   if (UseCrabCheckIsDeref) {
     crab::domains::crab_domain_params_man::get().set_param(
         "region.is_dereferenceable", "true");
+    crab::domains::crab_domain_params_man::get().set_param(
+        "object.reduction_level", CrabObjReduce);
+    crab::domains::crab_domain_params_man::get().set_param(
+        "object.singletons_in_base", "false");
   }
   /// Run the Crab analysis
   clam::ClamGlobalAnalysis::abs_dom_map_t assumptions;

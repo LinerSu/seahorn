@@ -9,6 +9,7 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 
 #include "seadsa/AllocWrapInfo.hh"
@@ -21,6 +22,16 @@
 
 using namespace llvm;
 using namespace seahorn;
+
+static llvm::cl::opt<bool> CrabRemoveIsDeref(
+    "crab-remove-is-deref",
+    llvm::cl::desc("Remove sea_is_dereferenceable() calls by true/false"),
+    llvm::cl::init(true));
+
+static llvm::cl::opt<bool> CrabAssumeIsDeref(
+    "crab-assume-is-deref",
+    llvm::cl::desc("Turn sea_is_dereferenceable() calls to assume"),
+    llvm::cl::init(false));
 
 namespace {
 
@@ -89,11 +100,28 @@ bool CrabLowerIsDeref::runOnModule(Module &M) {
             continue;
 
           // this is a call to sea.is_dereferenceable
-          Value *res = crabLowerIsDereferenceable(CB);
-          if (res) {
-            CB->replaceAllUsesWith(res);
-            deadCalls.push_back(CB);
-            Changed = true;
+          if (CrabRemoveIsDeref) {
+            Value *res = crabLowerIsDereferenceable(CB);
+            if (res) {
+              CB->replaceAllUsesWith(res);
+              if (CrabAssumeIsDeref) {
+                LLVMContext &ctx = M.getContext();
+                AttrBuilder B(ctx);
+                AttributeList as =
+                    AttributeList::get(ctx, AttributeList::FunctionIndex, B);
+                auto AssumeFn = dyn_cast<Function>(
+                    M.getOrInsertFunction("verifier.assume", as,
+                                          Type::getVoidTy(ctx),
+                                          Type::getInt1Ty(ctx))
+                        .getCallee());
+                IRBuilder<> Builder(ctx);
+                Builder.SetInsertPoint(I.getNextNode());
+                Builder.CreateCall(AssumeFn, CB);
+              } else {
+                deadCalls.push_back(CB);
+                Changed = true;
+              }
+            }
           }
         }
       }
@@ -110,21 +138,33 @@ bool CrabLowerIsDeref::runOnModule(Module &M) {
 const llvm::ConstantRange
 CrabLowerIsDeref::getCrabInstRng(const llvm::Instruction &I) const {
   // unsigned IntWidth = I.getType()->getIntegerBitWidth();
-  return m_crab_ptr->range(I);
+  Stats::resume("pp.crab.range");
+  const auto &range = m_crab_ptr->range(I);
+  Stats::stop("pp.crab.range");
+  return range;
 }
 
 Value *CrabLowerIsDeref::crabLowerIsDereferenceable(CallBase *IsDerefCall) {
-
   auto crabDerefResult = getCrabInstRng(*IsDerefCall);
   auto &C = IsDerefCall->getContext();
   if (crabDerefResult.isEmptySet()) {
     // Crab skips is_deref due to invariant inferred along the path is bottom
     // This means the is_deref cannot reach, delete it.
     Stats::count("crab.pp.isderef.solve");
+    LOG("seapp-crab", const llvm::DebugLoc &dloc = IsDerefCall->getDebugLoc();
+        unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
+        StringRef File = (*dloc).getFilename();
+        MSG << "crab solves (unreachable): " << *IsDerefCall
+            << " at File=" << File << " Line=" << Line << " col=" << Col;);
     return ConstantInt::getTrue(C);
   } else if (crabDerefResult.isSingleElement()) {
     // Crab inferred is_deref call is either true or false
     Stats::count("crab.pp.isderef.solve");
+    LOG("seapp-crab", const llvm::DebugLoc &dloc = IsDerefCall->getDebugLoc();
+        unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
+        StringRef File = (*dloc).getFilename();
+        MSG << "crab solves: " << *IsDerefCall << " at File=" << File
+            << " Line=" << Line << " col=" << Col;);
     return crabDerefResult.getSingleElement()->getBoolValue()
                ? ConstantInt::getTrue(C)
                : ConstantInt::getFalse(C);

@@ -9,6 +9,7 @@
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 
 using namespace llvm;
@@ -59,6 +60,19 @@ bool LowerIsDeref::runOnFunction(Function &F) {
         if (res) {
           NumIsDerefLower++;
           CB->replaceAllUsesWith(res);
+          // auto &M = *F.getParent();
+          // LLVMContext &ctx = M.getContext();
+          // AttrBuilder B(ctx);
+          // AttributeList as =
+          //     AttributeList::get(ctx, AttributeList::FunctionIndex, B);
+          // auto AssumeFn =
+          // dyn_cast<Function>(M.getOrInsertFunction("verifier.assume", as,
+          //                                                 Type::getVoidTy(ctx),
+          //                                                 Type::getInt1Ty(ctx))
+          //                               .getCallee());
+          // IRBuilder<> Builder(ctx);
+          // Builder.SetInsertPoint(I.getNextNode());
+          // Builder.CreateCall(AssumeFn, CB);
           deadCalls.push_back(CB);
           Changed = true;
         }
