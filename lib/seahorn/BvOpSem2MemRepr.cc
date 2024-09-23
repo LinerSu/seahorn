@@ -123,7 +123,8 @@ OpSemMemRepr::MemValTy OpSemMemArrayRepr::MemCpy(
     DOG(ERR << "Word size and pointer are not aligned and "
                "alignment is not ignored!");
     DOG(ERR << "Try --horn-bv2-lambdas=true or --horn-bv2-word-size=1");
-    assert(false);
+    DOG(WARN << "Interpreting memcpy as noop");
+    // assert(false);
   }
   return MemValTy(res);
 }
@@ -153,7 +154,9 @@ OpSemMemArrayRepr::MemCpy(PtrTy dPtr, PtrTy sPtr, unsigned len,
     DOG(ERR << "Word size and pointer are not aligned and "
                "alignment is not ignored!"
             << "\n");
-    assert(false);
+    DOG(WARN << "Interpreting memcpy as noop");
+    res = memRead.toExpr();
+    // assert(false);
   }
   return MemValTy(res);
 }
