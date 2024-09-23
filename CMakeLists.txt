@@ -86,7 +86,7 @@ if (GIT_FOUND)
     DEPENDS
     sea-dsa-git    
     llvm-seahorn-git
-    clam-git
+    # clam-git
   )
 
 else()
