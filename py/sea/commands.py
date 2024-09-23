@@ -563,6 +563,49 @@ class MixedSem(sea.LimitedCmd):
         argv.extend (args.in_files)
         return self.seappCmd.run (args, argv)
 
+class LoopPeelingPP(sea.LimitedCmd):
+    def __init__(self, quiet=False):
+        super(LoopPeelingPP, self).__init__('loop-peel', 'Loop peeling transformation',
+                                       allow_extra=True)
+
+    @property
+    def stdout (self):
+        return self.seappCmd.stdout
+
+    def name_out_file (self, in_files, args=None, work_dir=None):
+        ext = '.peel.bc'
+        # if args.llvm_asm: ext = '.peel.ll'
+        return _remap_file_name (in_files[0], ext, work_dir)
+
+    def mk_arg_parser (self, ap):
+        ap = super (LoopPeelingPP, self).mk_arg_parser (ap)
+        ap.add_argument ('--seapp-peel-loops', type=int,
+                         help='Loop peeling (default = 0)',
+                         dest='loop_peeling',
+                         default=0, metavar='NUM')
+
+        add_in_out_args (ap)
+        _add_S_arg (ap)
+        return ap
+
+    def run (self, args, extra):
+        cmd_name = which ('seapp')
+        if cmd_name is None: raise IOError ('seapp not found')
+        self.seappCmd = sea.ExtCmd (cmd_name,'',quiet)
+
+        argv = list()
+
+        if args.loop_peeling > 0:
+            argv.append ('--horn-peel-loops={t}'.format
+                         (t=args.loop_peeling))
+
+        if args.out_file is not None: argv.extend (['-o', args.out_file])
+
+        if args.llvm_asm: argv.append ('-S')
+
+        argv.extend (args.in_files)
+        return self.seappCmd.run(args, argv)
+
 class CrabPP(sea.LimitedCmd):
     def __init__(self, quiet=False):
         super(CrabPP, self).__init__('crabpp', 'Crab analysis in Seapp',
@@ -583,10 +626,20 @@ class CrabPP(sea.LimitedCmd):
                          metavar='STR', help='Log level')
         ap.add_argument ('--seapp-crab-dom', dest='crab_dom', default=None,
                          metavar='STR', help='Crab numerical abstract domain')
-        add_bool_argument(ap, 'seapp-crab-lower-is-deref', dest='crab_lower_is_deref',
-                            default=False, help='Use Crab to lower is_deref')
+        add_bool_argument(ap, 'seapp-crab-check-is-deref', dest='crab_check_is_deref',
+                            default=False, help='Use Crab to check is_deref')
         add_bool_argument(ap, 'seapp-crab-stats', dest='crab_stats',
                             default=False, help='Print Crab Statistics')
+        add_bool_argument(ap, 'seapp-crab-disable-warning', dest='crab_disable_warn',
+                          default=False, help='Disable Crab Warning')
+        add_bool_argument(ap, 'seapp-crab-liveness', dest='crab_live',
+                          default=False, help='Run crab liveness')
+        add_bool_argument(ap, 'seapp-crab-lower-is-deref', dest='crab_lower_is_deref',
+                            default=False, help='Use Crab to lower is_deref')
+        add_bool_argument(ap, 'seapp-crab-assume-is-deref', dest='crab_assume_is_deref',
+                            default=False, help='Turn crab solved is_deref to assume')
+        ap.add_argument('--seapp-crab-obj-reduction', dest='obj_reduction', default=None,
+                        metavar='STR', help='Crab object domain reduction configuration')
 
         add_in_out_args (ap)
         _add_S_arg (ap)
@@ -601,10 +654,16 @@ class CrabPP(sea.LimitedCmd):
         if args.out_file is not None: argv.extend (['-o', args.out_file])
         if args.llvm_asm: argv.append ('-S')
 
-        if args.crab_lower_is_deref:
+        if args.crab_check_is_deref:
             argv.append('--crab-check-is-deref')
             argv.append('--crab-lower-is-deref')
-        
+        if not args.crab_lower_is_deref:
+            # argv.append('--lower-is-deref')
+            argv.append('--crab-remove-is-deref=false')
+            argv.append('--crab-enable-warnings=false')
+        if args.crab_assume_is_deref:
+            argv.append('--crab-assume-is-deref')
+
         if args.crab_dom is not None: argv.extend (['--sea-crab-dom', args.crab_dom])
 
         if args.log is not None:
@@ -612,6 +671,15 @@ class CrabPP(sea.LimitedCmd):
 
         if args.crab_stats:
             argv.append('--seapp-stats')
+
+        if args.crab_disable_warn:
+            argv.append('--crab-enable-warnings=false')
+
+        if args.obj_reduction:
+            argv.extend (['--crab-obj-reduction', args.obj_reduction])
+
+        if args.crab_live:
+            argv.append('--crab-liveness')
 
         argv.extend (args.in_files)
         return self.seappCmd.run(args, argv)
@@ -1077,6 +1145,8 @@ class Unroll(sea.LimitedCmd):
                          default=131072, metavar='T')
         ap.add_argument('--bound', default=0, type=int,
                          help='Unroll bound (-unroll-count)', metavar='B')
+        ap.add_argument('--max-bound', default=0, type=int, dest='max_bound',
+                         help='Unroll max bound (-unroll-max-count)', metavar='B')
         add_bool_argument(ap, '--enable-runtime', dest='enable_runtime',
                          help='Allow unrolling loops with runtime trip count ' +
                          '(-unroll-runtime)')
@@ -1115,6 +1185,9 @@ class Unroll(sea.LimitedCmd):
 
         if args.bound > 0:
             argv.append ('-unroll-count={b}'.format(b=args.bound))
+
+        if args.max_bound > 0:
+            argv.append ('-unroll-max-count={b}'.format(b=args.max_bound))
 
         argv.extend (args.in_files)
         if args.llvm_asm: argv.append ('-S')
@@ -1163,6 +1236,8 @@ class Seahorn(sea.LimitedCmd):
                          metavar='STR', help='Log level for sea-dsa')
         ap.add_argument ('--crab-log', dest='crab_log', default=None,
                          metavar='STR', help='Log level for crab')
+        ap.add_argument('--crab-disable-warning', dest='crab_disable_warn',
+                          default=False, help='Disable Crab Warning')
         ap.add_argument ('--oll', dest='asm_out_file', default=None,
                          help='LLVM assembly output file')
         ap.add_argument ('--step',
@@ -1286,6 +1361,9 @@ class Seahorn(sea.LimitedCmd):
             for l in args.dsa_log.split (':'): argv.extend (['-log', l])
         if args.crab_log is not None:
             for l in args.crab_log.split (':'): argv.extend (['-crab-log', l])
+
+        if args.crab_disable_warn:
+            argv.append('--crab-enable-warnings=false')
 
         if args.ztrace is not None:
             for l in args.ztrace.split (':'): argv.extend (['-ztrace', l])
@@ -1674,7 +1752,7 @@ class InspectBitcode(sea.LimitedCmd):
 ## SeaHorn aliases
 FrontEnd = sea.SeqCmd ('fe', 'Front end: alias for clang|pp|ms|opt',
                        [Clang(), Seapp(), MixedSem(), Seaopt ()])
-FECrab = sea.SeqCmd ('fec', 'Front end: alias for clang|pp|ms|crabpp|opt',
+FECrab = sea.SeqCmd ('fec', 'Front end: alias for clang|pp|ms|peel|crabpp|opt',
                        [Clang(), Seapp(), MixedSem(), CrabPP(), Seaopt ()])
 Smt = sea.SeqCmd ('smt', 'alias for fe|horn', FrontEnd.cmds + [Seahorn()])
 Clp = sea.SeqCmd ('clp', 'alias for fe|horn-clp', FrontEnd.cmds + [SeahornClp()])

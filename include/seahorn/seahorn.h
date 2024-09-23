@@ -75,6 +75,8 @@ extern char sea_get_shadowmem(char, char *);
   __attribute__((annotate("partial"))) __attribute__((noinline))
 #define sassert(X)                                                             \
   (void)((__VERIFIER_assert(X), (X)) || (__VERIFIER_error(), 0))
+#elif NOCHECK
+#define sassert(X) 0
 #else
 /* Default semantics of sassert */
 #define sassert(X) (void)((X) || (__VERIFIER_error(), 0))

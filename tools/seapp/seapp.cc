@@ -29,6 +29,7 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
+#include "llvm/Transforms/Scalar/GVN.h"
 
 #include "llvm/IR/Verifier.h"
 
@@ -480,11 +481,16 @@ int main(int argc, char **argv) {
     // -- Externalize some user-selected functions
     pm_wrapper.add(seahorn::createExternalizeFunctionsPass());
   } else if (CrabLowerIsDeref) {
-    // -- prerequisite 1 : Lower constant expressions to instructions
+    // Global value numbering and redundant load elimination
+    pm_wrapper.add(llvm::createGVNPass());
+    // Lower constant expressions to instructions
     pm_wrapper.add(seahorn::createLowerCstExprPass());
-    pm_wrapper.add(llvm::createDeadCodeEliminationPass());
-    // -- prerequisite 2 : Run Name Values Pass
+    pm_wrapper.add(llvm::createCFGSimplificationPass());
+    // Run Name Values Pass
     pm_wrapper.add(seahorn::createNameValuesPass());
+    // cleanup after above transformations
+    pm_wrapper.add(llvm::createDeadCodeEliminationPass());
+    pm_wrapper.add(llvm::createUnreachableBlockEliminationPass());
     // -- attempt to lower any left sea.is_dereferenceable()
     // First pass is attempted by using LLVM Memory Builtins to compute
     // the requested size of access <= object size.
