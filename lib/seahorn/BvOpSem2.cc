@@ -171,6 +171,26 @@ static llvm::cl::opt<bool> UseCrabCheckIsDeref(
     llvm::cl::desc("Use crab to check sea.is_dereferenceable"),
     llvm::cl::init(false));
 
+// Crab print statistics
+static llvm::cl::opt<bool> CrabStats("horn-bv2-crab-stats",
+                                     llvm::cl::desc("Show crab statistics"),
+                                     llvm::cl::init(false));
+
+static llvm::cl::opt<std::string>
+    CrabObjReduce("horn-bv2-crab-obj-reduction",
+                  llvm::cl::desc("Provide Reduction Level"),
+                  llvm::cl::init("OPT"));
+
+static llvm::cl::opt<bool>
+    CrabLiveness("horn-bv2-crab-liveness",
+                 llvm::cl::desc("Run crab liveness to remove dead vars"),
+                 llvm::cl::init(false));
+
+static llvm::cl::opt<bool>
+    CrabAddAssume("horn-bv2-crab-is-deref-assume",
+                  llvm::cl::desc("Add isderef check as assumption"),
+                  llvm::cl::init(false));
+
 static llvm::cl::opt<bool> UseLVIInferRng(
     "horn-bv2-lvi-rng",
     llvm::cl::desc("Use LVI (LazyValueInfo) to infer rng invariants"),
@@ -862,29 +882,45 @@ public:
   };
 
   void visitIsDereferenceable(CallBase &CB) {
+    Stats::resume("opsem.is_deref");
     Expr ptr = lookup(*CB.getOperand(0));
     Expr byteSz = lookup(*CB.getOperand(1));
     Expr res;
-    bool crabSolved = false;
     if (UseCrabLowerIsDeref || UseCrabCheckIsDeref) {
       // if crab is used, infer the result of sea.is_deref
       auto derefInfoFromCrab = m_sem.getCrabInstRng(CB);
       if (derefInfoFromCrab.isEmptySet()) {
         // Crab skips is_deref due to invariant inferred along the path is
         // bottom
-        Stats::count("crab.isderef.solve");
+        Stats::count("crab.opsem.isderef.solve");
         // Remove this is_deref checks
         res = m_ctx.alu().getTrue();
+        LOG("opsem-crab", const llvm::DebugLoc &dloc = CB.getDebugLoc();
+            unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
+            StringRef File = (*dloc).getFilename();
+            MSG << "crab solves (unreachable): " << CB << " at File=" << File
+                << " Line=" << Line << " col=" << Col;);
+        // res = nullptr;
       } else if (derefInfoFromCrab.isSingleElement()) {
         // Crab inferred is_deref call is either true or false
         // Set the value for res expression
-        Stats::count("crab.isderef.solve");
+        Stats::count("crab.opsem.isderef.solve");
         res = derefInfoFromCrab.getSingleElement()->getBoolValue()
                   ? m_ctx.alu().getTrue()
                   : m_ctx.alu().getFalse();
-        crabSolved = true;
+        LOG("opsem-crab", const llvm::DebugLoc &dloc = CB.getDebugLoc();
+            unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
+            StringRef File = (*dloc).getFilename();
+            MSG << "crab solves: " << CB << " at File=" << File
+                << " Line=" << Line << " col=" << Col;);
+        // const llvm::DebugLoc &dloc = CB.getDebugLoc();
+        // unsigned Line = dloc.getLine();
+        // if (Line == 371 || Line == 352) {
+        //   res = nullptr;
+        // }
+        // res = nullptr;
       } else {
-        Stats::count("crab.isderef.not.solve");
+        Stats::count("crab.opsem.isderef.not.solve");
         LOG("opsem-crab", const llvm::DebugLoc &dloc = CB.getDebugLoc();
             unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
             StringRef File = (*dloc).getFilename();
@@ -892,10 +928,15 @@ public:
                 << " Line=" << Line << " col=" << Col;);
       }
     }
-    if (!crabSolved) {
+    if (!res) {
       res = m_ctx.mem().isDereferenceable(ptr, byteSz);
+    } else if (CrabAddAssume) {
+      Expr op = m_ctx.mem().isDereferenceable(ptr, byteSz);
+      m_ctx.addScopedSide(
+          boolop::lor(m_ctx.read(m_sem.errorFlag(*(CB.getParent()))), op));
     }
     setValue(CB, res);
+    Stats::stop("opsem.is_deref");
   }
 
   void visitIsModified(CallBase &CB) {
@@ -1576,21 +1617,31 @@ public:
                         getCarryBitPadWidth(I)));
       }
     } break;
-    case Intrinsic::uadd_sat: {
+    case Intrinsic::uadd_sat:
+    case Intrinsic::usub_sat: {
+      bool is_uadd = I.getIntrinsicID() == Intrinsic::uadd_sat;
       Type *ty = I.getOperand(0)->getType();
       Expr op0, op1;
       GetOpExprs(I, op0, op1);
       assert(op0 && op1);
-      Expr addRes = m_ctx.alu().doAdd(op0, op1, ty->getScalarSizeInBits());
-      Expr isNoOverflow =
-          m_ctx.alu().IsUaddNoOverflow(op0, op1, ty->getScalarSizeInBits());
-      assert(addRes && isNoOverflow);
-      mpz_class maxValZ;
-      for (unsigned i = 0; i < ty->getScalarSizeInBits(); ++i) {
-        maxValZ.setbit(i);
+      Expr Res = is_uadd
+                     ? m_ctx.alu().doAdd(op0, op1, ty->getScalarSizeInBits())
+                     : m_ctx.alu().doSub(op0, op1, ty->getScalarSizeInBits());
+      Expr isNoOutOfRange = is_uadd ? m_ctx.alu().IsUaddNoOverflow(
+                                          op0, op1, ty->getScalarSizeInBits())
+                                    : m_ctx.alu().IsUsubNoUnderflow(
+                                          op0, op1, ty->getScalarSizeInBits());
+      assert(Res && isNoOutOfRange);
+      mpz_class valZ;
+      if (is_uadd) {
+        for (unsigned i = 0; i < ty->getScalarSizeInBits(); ++i) {
+          valZ.setbit(i);
+        }
+      } else {
+        valZ = 0;
       }
-      Expr maxVal = m_ctx.alu().num(maxValZ, ty->getScalarSizeInBits());
-      Expr res = boolop::lite(isNoOverflow, addRes, maxVal);
+      Expr val = m_ctx.alu().num(valZ, ty->getScalarSizeInBits());
+      Expr res = boolop::lite(isNoOutOfRange, Res, val);
       setValue(I, res);
     } break;
     case Intrinsic::ssub_with_overflow: {
@@ -3610,7 +3661,7 @@ void Bv2OpSem::initCrabAnalysis(const llvm::Module &M) {
 
   // -- Set parameters for CFG
   clam::CrabBuilderParams cfg_builder_params;
-  LOG("opsem-crab", cfg_builder_params.print_cfg = true;);
+  // LOG("opsem-crab", cfg_builder_params.print_cfg = true;);
   cfg_builder_params.setPrecision(clam::CrabBuilderPrecision::MEM);
   cfg_builder_params.interprocedural = true;
   if (UseCrabLowerIsDeref) {
@@ -3634,10 +3685,22 @@ void Bv2OpSem::runCrabAnalysis() {
   aparams.run_inter = true;
   aparams.check = clam::CheckerKind::NOCHECKS;
   aparams.widening_delay = 2; // set to delay widening
+  aparams.run_liveness = CrabLiveness; // remove dead vars at the end of each bb
+
+  if (CrabStats) {
+    aparams.stats = true;
+    crab::CrabEnableStats();
+    aparams.check_verbose = 5;
+  }
+  LOG("opsem-crab-ir", aparams.output_crabir = "opsem.crabir";);
 
   if (UseCrabCheckIsDeref) {
     crab::domains::crab_domain_params_man::get().set_param(
         "region.is_dereferenceable", "true");
+    crab::domains::crab_domain_params_man::get().set_param(
+        "object.reduction_level", CrabObjReduce);
+    crab::domains::crab_domain_params_man::get().set_param(
+        "object.singletons_in_base", "false");
   }
   /// Run the Crab analysis
   clam::ClamGlobalAnalysis::abs_dom_map_t assumptions;
@@ -3664,7 +3727,10 @@ const llvm::ConstantRange Bv2OpSem::getCrabInstRng(const llvm::Instruction &I) {
   unsigned IntWidth = I.getType()->getIntegerBitWidth();
   if (!m_crab_rng_solver)
     return llvm::ConstantRange::getFull(IntWidth);
-  return m_crab_rng_solver->range(I);
+  Stats::resume("opsem.crab.range");
+  auto res = m_crab_rng_solver->range(I);
+  Stats::stop("opsem.crab.range");
+  return res;
 }
 
 const llvm::ConstantRange Bv2OpSem::getLVIInstRng(llvm::Instruction &I) {

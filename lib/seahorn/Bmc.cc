@@ -41,6 +41,9 @@ BmcEngine::BmcEngine(OperationalSemantics &sem, EZ3 &zctx)
     if (BmcSmtTactic == "sat" || llvm::StringRef(BmcSmtTactic).endswith("sat)"))
       z3n_set_param(":sat.euf", true);
   }
+  z3n_set_param(":rewriter.div0_ackermann_limit", 50000);
+  z3n_set_param(":sat.gc.initial", 50000);
+  z3n_set_param(":sat.gc.increment", 2000);
 }
 
 void BmcEngine::addCutPoint(const CutPoint &cp) {
