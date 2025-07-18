@@ -898,8 +898,8 @@ public:
         LOG("opsem-crab", const llvm::DebugLoc &dloc = CB.getDebugLoc();
             unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
             StringRef File = (*dloc).getFilename();
-            MSG << "crab solves (unreachable): " << CB << " at File=" << File
-                << " Line=" << Line << " col=" << Col;);
+            MSG << "crab solves (unreachable): " << CB << " at " << File << ":"
+                << Line << ":" << Col;);
         // res = nullptr;
       } else if (derefInfoFromCrab.isSingleElement()) {
         // Crab inferred is_deref call is either true or false
@@ -911,8 +911,8 @@ public:
         LOG("opsem-crab", const llvm::DebugLoc &dloc = CB.getDebugLoc();
             unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
             StringRef File = (*dloc).getFilename();
-            MSG << "crab solves: " << CB << " at File=" << File
-                << " Line=" << Line << " col=" << Col;);
+            MSG << "crab solves: " << CB << " at " << File << ":" << Line << ":"
+                << Col;);
         // const llvm::DebugLoc &dloc = CB.getDebugLoc();
         // unsigned Line = dloc.getLine();
         // if (Line == 371 || Line == 352) {
@@ -924,8 +924,8 @@ public:
         LOG("opsem-crab", const llvm::DebugLoc &dloc = CB.getDebugLoc();
             unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
             StringRef File = (*dloc).getFilename();
-            MSG << "crab cannot solve: " << CB << " at File=" << File
-                << " Line=" << Line << " col=" << Col;);
+            MSG << "crab cannot solve: " << CB << " at " << File << ":" << Line
+                << ":" << Col;);
       }
     }
     if (!res) {
@@ -1771,6 +1771,40 @@ public:
         setValue(I, Expr());
       } else {
         Expr res = bind::lite(cond, op0, op1);
+        setValue(I, res);
+      }
+    } break;
+    case Intrinsic::fshl:
+    case Intrinsic::fshr: {
+      // fshl, fshr
+      // <ty> @llvm.fshl.<ty>(<ty> %high, <ty> %low, <ty> %shift)
+      // result = ( (%high  << %shift)        // left-shift high
+      //      | (%low >> (width-%shift)) )  // right-shift low to fill in
+      // <ty> @llvm.fshr.<ty>(<ty> %high, <ty> %low, <ty> %shift)
+      // result = ( (%low >> %shift)        // right-shift low
+      //      | (%high << (width − %shift)) ) // left-shift high to fill in
+      Expr high = lookup(*I.getOperand(0));  // high operand
+      Expr low = lookup(*I.getOperand(1));   // low operand
+      Expr shift = lookup(*I.getOperand(2)); // shift operand
+      if (!high || !low || !shift) {
+        LOG("opsem", WARN << "An operation returned null:" << I);
+        setValue(I, Expr());
+      } else {
+        Type *ty = I.getType();
+        unsigned bw = ty->getScalarSizeInBits();
+        Expr bitwidth = m_ctx.alu().num(bw, bw);
+        // round shift based on width
+        shift = m_ctx.alu().doURem(shift, bitwidth, bw);
+        Expr res;
+        if (I.getIntrinsicID() == Intrinsic::fshl) {
+          res = m_ctx.alu().doOr(
+              mk<BSHL>(high, shift),
+              mk<BLSHR>(low, m_ctx.alu().doSub(bitwidth, shift, bw)), bw);
+        } else {
+          res = m_ctx.alu().doOr(
+              mk<BLSHR>(low, shift),
+              mk<BSHL>(high, m_ctx.alu().doSub(bitwidth, shift, bw)), bw);
+        }
         setValue(I, res);
       }
     } break;
@@ -3701,6 +3735,8 @@ void Bv2OpSem::runCrabAnalysis() {
         "object.reduction_level", CrabObjReduce);
     crab::domains::crab_domain_params_man::get().set_param(
         "object.singletons_in_base", "false");
+    crab::domains::crab_domain_params_man::get().set_param(
+        "fixed_tvpi.coefficients", "2,3,4,5,8,10,16,24,32,40");
   }
   /// Run the Crab analysis
   clam::ClamGlobalAnalysis::abs_dom_map_t assumptions;

@@ -1238,6 +1238,8 @@ class Seahorn(sea.LimitedCmd):
                          metavar='STR', help='Log level for crab')
         ap.add_argument('--crab-disable-warning', dest='crab_disable_warn',
                           default=False, help='Disable Crab Warning')
+        ap.add_argument('--crab-only', dest='crab_only', default=False,
+                         help='Run Crab only')
         ap.add_argument ('--oll', dest='asm_out_file', default=None,
                          help='LLVM assembly output file')
         ap.add_argument ('--step',
@@ -1334,6 +1336,9 @@ class Seahorn(sea.LimitedCmd):
             argv.append('--horn-chc-bv')
             # bit-precise CHC implies bit-precise cex
             args.bv_cex = True
+
+        if args.crab_only:
+            args.solve = False
 
         if args.solve:
             argv.append ('--horn-solve')

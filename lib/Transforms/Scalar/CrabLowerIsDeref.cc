@@ -154,8 +154,8 @@ Value *CrabLowerIsDeref::crabLowerIsDereferenceable(CallBase *IsDerefCall) {
     LOG("seapp-crab", const llvm::DebugLoc &dloc = IsDerefCall->getDebugLoc();
         unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
         StringRef File = (*dloc).getFilename();
-        MSG << "crab solves (unreachable): " << *IsDerefCall
-            << " at File=" << File << " Line=" << Line << " col=" << Col;);
+        MSG << "crab solves (unreachable): " << *IsDerefCall << " at " << File
+            << ":" << Line << ":" << Col;);
     return ConstantInt::getTrue(C);
   } else if (crabDerefResult.isSingleElement()) {
     // Crab inferred is_deref call is either true or false
@@ -163,8 +163,8 @@ Value *CrabLowerIsDeref::crabLowerIsDereferenceable(CallBase *IsDerefCall) {
     LOG("seapp-crab", const llvm::DebugLoc &dloc = IsDerefCall->getDebugLoc();
         unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
         StringRef File = (*dloc).getFilename();
-        MSG << "crab solves: " << *IsDerefCall << " at File=" << File
-            << " Line=" << Line << " col=" << Col;);
+        MSG << "crab solves: " << *IsDerefCall << " at " << File << ":" << Line
+            << ":" << Col;);
     return crabDerefResult.getSingleElement()->getBoolValue()
                ? ConstantInt::getTrue(C)
                : ConstantInt::getFalse(C);
@@ -174,8 +174,8 @@ Value *CrabLowerIsDeref::crabLowerIsDereferenceable(CallBase *IsDerefCall) {
     LOG("seapp-crab", const llvm::DebugLoc &dloc = IsDerefCall->getDebugLoc();
         unsigned Line = dloc.getLine(); unsigned Col = dloc.getCol();
         StringRef File = (*dloc).getFilename();
-        MSG << "crab cannot solve: " << *IsDerefCall << " at File=" << File
-            << " Line=" << Line << " col=" << Col;);
+        MSG << "crab cannot solve: " << *IsDerefCall << " at " << File << ":"
+            << Line << ":" << Col;);
     return nullptr;
   }
 }

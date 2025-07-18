@@ -140,7 +140,10 @@ static llvm::cl::opt<clam::CrabDomain::Type, true, clam::CrabDomainParser>
                             "Wrapped interval domain"),
                  clEnumValN(clam::CrabDomain::OCT, "oct", "Octagon domain"),
                  clEnumValN(clam::CrabDomain::PK, "pk",
-                            "Convex Polyhedra and Linear Equalities domains")),
+                            "Convex Polyhedra and Linear Equalities domains"),
+                 clEnumValN(
+                     clam::CrabDomain::FIXED_TVPI_DBM, "fixed-tvpi-dbm",
+                     "Using DBMs for expressing TVPI with fixed coefficients")),
              llvm::cl::location(seahorn::CrabDom),
              llvm::cl::init(clam::CrabDomain::ZONES_SPLIT_DBM));
 

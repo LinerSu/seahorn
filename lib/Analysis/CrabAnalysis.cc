@@ -42,7 +42,10 @@ static llvm::cl::opt<clam::CrabDomain::Type, true, clam::CrabDomainParser>
                             "Wrapped interval domain"),
                  clEnumValN(clam::CrabDomain::OCT, "oct", "Octagon domain"),
                  clEnumValN(clam::CrabDomain::PK, "pk",
-                            "Convex Polyhedra and Linear Equalities domains")),
+                            "Convex Polyhedra and Linear Equalities domains"),
+                 clEnumValN(
+                     clam::CrabDomain::FIXED_TVPI_DBM, "fixed-tvpi-dbm",
+                     "Using DBMs for expressing TVPI with fixed coefficients")),
              llvm::cl::location(CrabDom),
              llvm::cl::init(clam::CrabDomain::INTERVALS));
 
@@ -112,6 +115,8 @@ void CrabAnalysis::runCrabAnalysis() {
         "object.reduction_level", CrabObjReduce);
     crab::domains::crab_domain_params_man::get().set_param(
         "object.singletons_in_base", "false");
+    crab::domains::crab_domain_params_man::get().set_param(
+        "fixed_tvpi.coefficients", "2,3,4,5,8,10,16,24,32,40");
   }
   /// Run the Crab analysis
   clam::ClamGlobalAnalysis::abs_dom_map_t assumptions;
